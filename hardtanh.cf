@@ -1,0 +1,39 @@
+def Shape as (Float l, Float u, PolyExp L, PolyExp U){[(curr[l]<=curr),(curr[u]>=curr),(curr[L]<=curr),(curr[U]>=curr)]};
+
+func simplify_lower(Neuron n, Float coeff) = (coeff >= 0.0) ? (coeff * n[l]) : (coeff * n[u]);
+func simplify_upper(Neuron n, Float coeff) = (coeff >= 0.0) ? (coeff * n[u]) : (coeff * n[l]);
+
+func replace_lower(Neuron n, Float coeff) = (coeff >= 0.0) ? (coeff * n[L]) : (coeff * n[U]);
+func replace_upper(Neuron n, Float coeff) = (coeff >= 0.0) ? (coeff * n[U]) : (coeff * n[L]);
+
+func priority(Neuron n) = n[layer];
+func priority2(Neuron n, Float c) = -n[layer];
+func stop(Neuron n) = false;
+func stop_traverse(Neuron n, Float c) = false;
+
+func backsubs_lower(PolyExp e, Neuron n) = (e.traverse(backward, priority2, stop_traverse, replace_lower){e <= n}).map(simplify_lower);
+func backsubs_upper(PolyExp e, Neuron n) = (e.traverse(backward, priority2, stop_traverse, replace_upper){e >= n}).map(simplify_upper);
+
+func lowA(Neuron n) = n[l] + n[u] + 2.0 >= 0.0 ? n : -1;
+func upA(Neuron n) = ((n[u] + 1.0) / (n[u] - n[l])) * n - (((n[u] + 1.0) * n[l]) / (n[u] - n[l])) - 1.0;
+
+func lowB(Neuron n) = ((1.0 - n[l]) / (n[u] - n[l])) * n + (n[l] - (((1.0 - n[l]) * n[l]) / (n[u] - n[l])));
+func upB(Neuron n) = n[u] + n[l] <= 2.0 ? n : 1.0;
+
+func lowC(Neuron n) = (2.0 / (n[u] + 1.0)) * n + ((2.0 / (n[u] + 1.0)) - 1.0);
+func upC(Neuron n) = (2.0 / (1.0 - n[l])) * n + (1.0 - (2.0 / (1.0 - n[l])));
+
+transformer hardtanh_cert{
+    Affine -> (backsubs_lower(prev.dot(curr[weight]) + curr[bias], curr),
+               backsubs_upper(prev.dot(curr[weight]) + curr[bias], curr),
+               prev.dot(curr[weight]) + curr[bias],
+               prev.dot(curr[weight]) + curr[bias]);
+    HardTanh -> (prev[u] <= -1) ? (-1, -1, -1, -1) :
+                ((prev[l] >= 1.0) ? (1.0, 1.0, 1.0, 1.0) :
+                (((prev[l] >= -1) and (prev[u] <= 1.0)) ? (prev[l], prev[u], prev, prev) :
+                ((prev[u] <= 1.0) ? (-1, prev[u], lowA(prev), upA(prev)) :
+                ((prev[l] >= -1) ? (prev[l], 1.0, lowB(prev), upB(prev)) :
+                (-1, 1.0, lowC(prev), upC(prev))))));
+}
+
+flow(forward, priority, stop, hardtanh_cert);
